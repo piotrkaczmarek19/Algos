@@ -1,0 +1,182 @@
+# SVM algorithm using simplified SMO
+from __future__ import division
+import cPickle, gzip
+import numpy as np
+from numpy import linalg
+import time
+import math
+import csv
+
+
+
+def normalize(X):	
+	return (X - X.min(axis=0)) / (X.max(axis=0) - X.min(axis=0))
+
+# encode labels to {-1,1}
+def encode_labels(y):
+	y_encode = np.zeros(y.shape)
+	for i in range(len(y)):
+		if y[i] == 0:
+			y_encode[i] = -1
+		else:
+			y_encode[i] = 1
+	return y_encode
+
+def convert_date_to_int(X, format):
+	g = lambda X: [x for x in X if x in format]
+	for i in range(len(X)):
+		if g(X[i]):
+			day = g(X[i])[0]
+			idx = X[i].index(day)
+			X[i][idx] = format.index(day)
+
+def gaussian_kernel(x,z, sigma = 0.5):
+	return np.exp((-np.linalg.norm(x - z) ** 2) / (2 * sigma ** 2))
+
+def linear_kernel(x,z):
+	return np.dot(x, z.T)
+
+class SVM(object):
+	def __init__(self, kernel, C=100.0):
+		self.kernel = kernel
+		self.C = C
+
+	def fit(self, X, y, iterations = 10000, tol=0.0001):
+		num_passes = 100
+		self.w = np.zeros((X.shape[1], 1))
+		self.alpha = np.zeros(len(X))
+		b = 0
+		# Compute Graham matrix and store it in cache
+		self.K = self.compute_graham(X, X)
+
+		current_iter = 0
+		passes = 0
+
+		while (passes < num_passes and current_iter < iterations):
+			alpha_changed = 0
+
+			for i in range(len(X)):
+				E_i = np.dot(self.alpha.T, y * self.K[: , i]) - y[i] + b
+				#E_i = self.compute_E(i, y, b)
+				
+				if (y[i] * E_i < -tol and self.alpha[i] < self.C) or (y[i] * E_i > tol and self.alpha[i] > 0):
+					# Picking random j distinct from i
+					j = i
+					while j == i:
+						j = np.random.randint(0, len(X) - 1)
+					
+					E_j = np.dot(self.alpha.T, y * self.K[: , j]) - y[j] + b
+					#E_j = self.compute_E(j, y, b)
+
+					# Computing L & H
+					a_i = self.alpha[i]
+					a_j = self.alpha[j]
+					if y[i] * y[j] > 0:
+						L = max(0, a_i + a_j - self.C)
+						H = min(self.C, a_i + a_j)
+					else:
+						L = max(0, a_j - a_i)
+						H = min(self.C, self.C + a_j - a_i)
+
+					if abs(L - H) < tol:
+						continue
+
+					eta = 2 * self.K[i,j] - self.K[i,i] - self.K[j,j]
+					if eta >= 0:
+						continue
+
+					# compute new alpha_j and alpha_i and clip it into L, H 
+					a_j_temp = a_j - y[j] * (E_i - E_j) / eta
+					if a_j_temp > H:
+						a_j_temp = H
+					elif a_j_temp < L:
+						a_j_temp = L
+
+					if abs(a_j - a_j_temp) < tol:
+						continue
+					self.alpha[j] = a_j_temp
+
+					a_i_temp = a_i + y[i] * y[j] * (a_j - a_j_temp)
+					self.alpha[i] = a_i_temp
+
+					# Update bias term
+					b1 = b - E_i - y[i] * (a_i_temp - a_i) * self.K[i,i] - y[j] * (a_j_temp - a_j) * self.K[i,j]
+					b2 = b - E_j - y[i] * (a_i_temp - a_i) * self.K[i,j] - y[j] * (a_j_temp - a_j) * self.K[j,j]
+
+					b = (b1 + b2) / 2
+					if a_i_temp > 0 and a_i_temp < self.C:
+						b = b1
+					elif a_j_temp > 0 and a_j_temp < self.C:
+						b = b2
+
+					alpha_changed += 1
+			current_iter += 1
+
+			passes = passes + 1 if (alpha_changed == 0) else 0
+
+		# identifying support vectors
+		alpha_index = [index for index, alpha in enumerate(self.alpha) if alpha > 0]
+
+		self.model = dict()
+		self.model['X'] = X[alpha_index]
+		
+		self.model['alpha'] = self.alpha[alpha_index]
+		self.model['b'] = b
+		self.model['w'] = np.dot(X.T, np.multiply(self.alpha, y))
+
+		output = self.predict(X)
+		for i in range(len(output)):
+			if output[i] >= 0:
+				output[i] = 1
+			else:
+				output[i] = -1
+		accuracy = np.sum((output == y)) / len(X) * 100
+		print output
+
+		print "Accuracy for training data is : ", accuracy, "%"
+
+
+	def compute_w(self,X, y):
+		return np.dot(y * self.alpha, X)
+
+	def predict(self, X_test):
+		m, n  = X_test.shape
+		fx = np.matrix(np.zeros([m,1]))
+		if self.kernel == linear_kernel:
+			w = self.model['w']
+			b = self.model['b']
+			fx = np.dot(w.T, X_test.T) + b
+		else:
+			alphas = self.model['alpha']
+			X = self.model['X']
+			b = self.model['b']
+			Y = self.model['Y']
+
+			K = self.compute_graham(X_test, X)
+			b = self.model['b']
+			fx = K.dot(alphas * Y) + b
+		return fx
+
+	def compute_E(self, i, y, b):
+		E_i = b - y[i]
+		for j in range(len(X)):
+			E_i += self.alpha[i] * y[i] * self.K[i,j]
+		return E_i
+
+	def compute_graham(self, X, Z):
+		K = np.zeros((len(X), len(Z)))
+		for i in range(len(X)):
+			for j in range(len(Z)):
+				K[i][j] = self.kernel(X[i], Z[j])
+		return K
+
+
+data = np.loadtxt('ex2data1.txt', delimiter=',')
+
+X = data[:, 0:4]
+y = data[:, -1]
+Y = encode_labels(y)
+
+
+svm = SVM(linear_kernel, len(X))
+svm.fit(X, Y)

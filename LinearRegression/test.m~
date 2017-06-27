@@ -1,0 +1,44 @@
+%% Initialization
+clear ; close all; clc
+
+x = [1:50].';
+
+y = [4554 3014 2171 1891 1593 1532 1416 1326 1297 1266 ...
+	1248 1052 951 936 918 797 743 665 662 652 ...
+	629 609 596 590 582 547 486 471 462 435 ...
+	424 403 400 386 386 384 384 383 370 365 ...
+	360 358 354 347 320 319 318 311 307 290 ].';
+%
+
+m = length(y); % number training examples
+X = [ ones(m,1) x ]; % adding X0
+
+plot(X,y,'rx', 'MarkerSize', 10, 'LineWidth', 2);
+legend('Training data');
+
+n = size(X,2); % number of features
+
+theta = [0 0]';
+
+alpha = 0.02;
+err = [0 0]';
+iterations = 10000;
+
+for i=1:iterations,
+  % shuffling X
+  randidx = randperm(size(X,1));
+  X_shuffled = X(randidx(1:size(X)),:);
+
+  for j=1:m,
+	theta = theta - alpha * X(:,j)' * (X*theta - y)
+
+figure;
+plot(X(:,2),y,'bs-');
+hold on
+plot(X(:,2),X*theta,'rp-');
+legend('measured','predicted-stochastic');
+grid on;
+xlabel('Page index, x');
+ylabel('Page views, y');
+title('Measured and predicted page views');
+
